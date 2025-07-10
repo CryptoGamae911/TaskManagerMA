@@ -775,10 +775,12 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1500, 900)
         # Initialize process lists
         self.processes = []
+        self.previous_pids = set()  # Track PIDs from previous refresh
         self.system_processes = []
         self.non_system_processes = []
         self.unknown_processes = []
         self.system_users = {'SYSTEM', 'root', 'LocalService', 'NetworkService'}
+        self.process_changes = {'added': [], 'removed': []}  # Track process changes
         
         # Set up UI
         self.setStyleSheet("""
@@ -1005,11 +1007,94 @@ class MainWindow(QMainWindow):
         self.system_table.setRowCount(0)
         self.system_table.populate_table(self.system_processes)
 
+    def show_process_changes(self, added, removed):
+        """Show a dialog with process changes"""
+        if not added and not removed:
+            return
+            
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Process Changes Detected")
+        dialog.setMinimumSize(600, 400)
+        
+        layout = QVBoxLayout()
+        
+        # Create tab widget
+        tab_widget = QTabWidget()
+        
+        # Tab for new processes
+        if added:
+            new_tab = QWidget()
+            new_layout = QVBoxLayout()
+            
+            table = QTableWidget()
+            table.setColumnCount(3)
+            table.setHorizontalHeaderLabels(["PID", "Name", "User"])
+            table.setRowCount(len(added))
+            
+            for row, proc in enumerate(added):
+                table.setItem(row, 0, QTableWidgetItem(str(proc[0])))  # PID
+                table.setItem(row, 1, QTableWidgetItem(proc[2]))      # Name
+                table.setItem(row, 2, QTableWidgetItem(proc[5]))      # User
+            
+            table.resizeColumnsToContents()
+            new_layout.addWidget(QLabel(f"{len(added)} New Processes:"))
+            new_layout.addWidget(table)
+            new_tab.setLayout(new_layout)
+            tab_widget.addTab(new_tab, f"New Processes ({len(added)})")
+        
+        # Tab for terminated processes
+        if removed:
+            term_tab = QWidget()
+            term_layout = QVBoxLayout()
+            
+            table = QTableWidget()
+            table.setColumnCount(3)
+            table.setHorizontalHeaderLabels(["PID", "Name", "User"])
+            table.setRowCount(len(removed))
+            
+            for row, proc in enumerate(removed):
+                table.setItem(row, 0, QTableWidgetItem(str(proc[0])))  # PID
+                table.setItem(row, 1, QTableWidgetItem(proc[2]))      # Name
+                table.setItem(row, 2, QTableWidgetItem(proc[5]))      # User
+            
+            table.resizeColumnsToContents()
+            term_layout.addWidget(QLabel(f"{len(removed)} Terminated Processes:"))
+            term_layout.addWidget(table)
+            term_tab.setLayout(term_layout)
+            tab_widget.addTab(term_tab, f"Terminated ({len(removed)})")
+        
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        
+        # Add to layout
+        layout.addWidget(tab_widget)
+        layout.addWidget(close_btn, 0, Qt.AlignRight)
+        
+        dialog.setLayout(layout)
+        dialog.exec_()
+
     def refresh_processes(self):
         """Manually refresh the process list"""
         try:
+            # Store previous PIDs before refresh
+            previous_pids = {p[0] for p in self.processes} if self.processes else set()
+            
             # Get current processes
             self.processes = get_all_processes()
+            current_pids = {p[0] for p in self.processes}
+            
+            # Find added and removed processes
+            added_pids = current_pids - previous_pids
+            removed_pids = previous_pids - current_pids
+            
+            # Get full process info for changes
+            added_processes = [p for p in self.processes if p[0] in added_pids]
+            removed_processes = [p for p in self.processes if p[0] in removed_pids]
+            
+            # Show changes if not the first run
+            if previous_pids and (added_processes or removed_processes):
+                self.show_process_changes(added_processes, removed_processes)
             
             # Update process lists
             self.unknown_processes = [p for p in self.processes if p[15]=='Unknown' and p[5] not in self.system_users]
